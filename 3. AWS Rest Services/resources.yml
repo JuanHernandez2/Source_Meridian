@@ -1,0 +1,226 @@
+Description: 'Resources for source'
+Parameters:
+
+  ParameterBucket:
+    Description: Bucket where the env info for the hgroups is located
+    Type: String
+    Default: adsk-des-iaas-storageservices-isoc-pure-parameters
+
+  ApiGetResource:
+    Description: 'Get API endpoint'
+    Type: String
+    Default: 'get-info'
+
+  ApiPutResource:
+    Description: 'Put API endpoint'
+    Type: String
+    Default: 'put-info'
+  
+  ApiDeleteResource:
+    Description: 'Delete API endpoint'
+    Type: String
+    Default: 'delete-info'
+
+Resources:
+  InfoTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: 'id'
+        AttributeType: 'S'
+      KeySchema:
+      - AttributeName: 'id'
+        KeyType: HASH
+      TableName: 'information-table'
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  DynamoDBRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+               - lambda.amazonaws.com
+            Action:
+             - sts:AssumeRole
+      Path: "/"
+      Policies:
+        - PolicyName: l
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: VisualEditor0
+                Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - logs:CreateLogStream
+                  - s3:ListAllMyBuckets
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - s3:HeadBucket
+                  - logs:CreateLogGroup
+                  - logs:PutLogEvents
+                Resource: "*"
+              - Sid: VisualEditor1
+                Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:GetItem
+                  - dynamodb:Scan
+                  - dynamodb:Query
+                  - dynamodb:UpdateItem
+                Resource:
+                  - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/information-table'
+              - Sid: VisualEditor28
+                Effect: Allow
+                Action: s3:*
+                Resource:
+                  - !Sub 'arn:aws:s3:::${ParameterBucket}'
+                  - !Sub 'arn:aws:s3:::${ParameterBucket}/*'
+
+  Lambda: 
+    Type: "AWS::Lambda::Function"
+    Properties: 
+      Handler: "lambda_function.lambda_handler"
+      Role: 
+        Fn::GetAtt: 
+          - "DynamoDBRole"
+          - "Arn"
+      Code: 
+        S3Bucket: !Ref ParameterBucket
+        S3Key: "lambda.zip"
+      Runtime: "python3.7"
+      Timeout: 10
+      FunctionName: 'invoked_lambda'
+      Environment:
+        Variables:
+          INFO_TABLE: 'information-table'
+
+  Api:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Name: !Sub 'source-api'
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  GetResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt Api.RootResourceId
+      RestApiId: !Ref Api
+      PathPart: !Ref ApiGetResource
+
+  PutResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt Api.RootResourceId
+      RestApiId: !Ref Api
+      PathPart: !Ref ApiPutResource
+  
+  DeleteResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      ParentId: !GetAtt Api.RootResourceId
+      RestApiId: !Ref Api
+      PathPart: !Ref ApiDeleteResource
+
+  GetMethod:
+    Type: "AWS::ApiGateway::Method"
+    DependsOn:
+      - GetResource
+    Properties:
+      AuthorizationType: "NONE"
+      HttpMethod: "GET"
+      Integration:
+        IntegrationHttpMethod: "POST"
+        Type: "AWS_PROXY"
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Lambda.Arn}/invocations'
+      ResourceId: !Ref GetResource
+      RestApiId: !Ref Api
+
+  PutMethod:
+    Type: "AWS::ApiGateway::Method"
+    DependsOn:
+      - PutResource
+    Properties:
+      AuthorizationType: "NONE"
+      HttpMethod: "PUT"
+      Integration:
+        IntegrationHttpMethod: "POST"
+        Type: "AWS_PROXY"
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Lambda.Arn}/invocations'
+      ResourceId: !Ref PutResource
+      RestApiId: !Ref Api
+
+  DeleteMethod:
+    Type: "AWS::ApiGateway::Method"
+    DependsOn:
+      - DeleteResource
+    Properties:
+      AuthorizationType: "NONE"
+      HttpMethod: "DELETE"
+      Integration:
+        IntegrationHttpMethod: "POST"
+        Type: "AWS_PROXY"
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${Lambda.Arn}/invocations'
+      ResourceId: !Ref DeleteResource
+      RestApiId: !Ref Api
+
+  lambdaApiGatewayInvokeGet:
+    Type: "AWS::Lambda::Permission"
+    DependsOn:
+      - GetMethod
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref Lambda
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*/POST/${ApiGetResource}"
+
+  lambdaApiGatewayInvokePut:
+    Type: "AWS::Lambda::Permission"
+    DependsOn:
+      - PutMethod
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref Lambda
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*/POST/${ApiPutResource}"
+  
+  lambdaApiGatewayInvokeDelete:
+    Type: "AWS::Lambda::Permission"
+    DependsOn:
+      - DeleteMethod
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref Lambda
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*/POST/${ApiDeleteResource}"
+
+  ApiDeployment:
+    Type: "AWS::ApiGateway::Deployment"
+    DependsOn:
+      - "lambdaApiGatewayInvokeGet"
+      - "lambdaApiGatewayInvokePut"
+      - "lambdaApiGatewayInvokeDelete"
+    Properties:
+      RestApiId: !Ref Api
+      StageName: 'prod'
+
+
+Outputs:
+  DynamoDBRole:
+    Value: !Ref DynamoDBRole
+    Description: Role name for dynamodb
+  LambdaTriggerHandler:
+    Value: !Sub 'https://console.aws.amazon.com/lambda/home?region=${AWS::Region}#/functions/${Lambda}?tab=graph'
+    Description: Url for lambda function
+  ApiGateway:
+    Value: !Sub 'https://console.aws.amazon.com/apigateway/home?region=us-east-1#/apis/${Api}/resources'
+    Description: ApiGateway URL

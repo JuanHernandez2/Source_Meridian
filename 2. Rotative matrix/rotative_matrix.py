@@ -61,4 +61,4 @@ if __name__ == "__main__":
         [11, 4, 3, 6],
         [10, 9, 8, 7]
     ]
-    matrixRotation(matrix, 1)
+    matrixRotation(matrix, 2)
